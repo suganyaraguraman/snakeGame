@@ -2,14 +2,19 @@ import { useEffect, useRef, useState } from "react";
 
 const SnakeGame = () => {
   const canvasRef = useRef(null);
-  const gridSize = 20; // Move these to the top
-  const canvasSize = 400;
-
-  const [snake, setSnake] = useState([{ x: 10, y: 10 }]);
-  const [food, setFood] = useState(generateFood(5)); // Start with 5 food items
-  const [velocity, setVelocity] = useState({ x: 1, y: 0 }); // Start moving to the right
+  const [snake, setSnake] = useState([{ x: 10, y: 10 }]); // Initial snake position
+  const [foodItems, setFoodItems] = useState([{ x: 5, y: 5 }]); // Start with one food item
+  const [velocity, setVelocity] = useState({ x: 1, y: 0 }); // Start moving right
   const [gameOver, setGameOver] = useState(false);
+  const [gameWon, setGameWon] = useState(false);
+  const [touchStart, setTouchStart] = useState(null);
 
+  const gridSize = 20;
+  const canvasSize = 400;
+  const targetFoodCount = 10; // Target food items to eat to win
+  const [eatenFoodCount, setEatenFoodCount] = useState(0); // Track number of food eaten
+
+  // Handle keyboard events for desktop
   const handleKeyDown = (e) => {
     switch (e.key) {
       case "ArrowUp":
@@ -29,23 +34,49 @@ const SnakeGame = () => {
     }
   };
 
+  // Handle touch events for mobile
+  const handleTouchStart = (e) => {
+    const touchStart = e.touches[0];
+    setTouchStart({ x: touchStart.clientX, y: touchStart.clientY });
+  };
+
+  const handleTouchEnd = (e) => {
+    if (!touchStart) return;
+    const touchEnd = e.changedTouches[0];
+    const diffX = touchEnd.clientX - touchStart.x;
+    const diffY = touchEnd.clientY - touchStart.y;
+
+    if (Math.abs(diffX) > Math.abs(diffY)) {
+      if (diffX > 0 && velocity.x === 0) {
+        setVelocity({ x: 1, y: 0 }); // Swipe Right
+      } else if (diffX < 0 && velocity.x === 0) {
+        setVelocity({ x: -1, y: 0 }); // Swipe Left
+      }
+    } else {
+      if (diffY > 0 && velocity.y === 0) {
+        setVelocity({ x: 0, y: 1 }); // Swipe Down
+      } else if (diffY < 0 && velocity.y === 0) {
+        setVelocity({ x: 0, y: -1 }); // Swipe Up
+      }
+    }
+
+    setTouchStart(null);
+  };
+
   useEffect(() => {
     document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-    };
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [velocity]);
 
   useEffect(() => {
     const ctx = canvasRef.current.getContext("2d");
 
     const drawGame = () => {
-      if (gameOver) return;
+      if (gameOver || gameWon) return;
 
       const head = { x: snake[0].x + velocity.x, y: snake[0].y + velocity.y };
 
-      // Check for wall collisions or self-collision
+      // Collision check: wall or self
       if (
         head.x < 0 ||
         head.x >= canvasSize / gridSize ||
@@ -57,68 +88,77 @@ const SnakeGame = () => {
         return;
       }
 
+      // Add the new head to the snake
       const newSnake = [head, ...snake];
 
-      // Check if the snake eats any food
-      const remainingFood = food.filter(
-        (f) => f.x !== head.x || f.y !== head.y
+      // Check for food collision
+      const eatenFood = foodItems.filter(
+        (food) => food.x === head.x && food.y === head.y
       );
+      if (eatenFood.length > 0) {
+        // Food eaten, remove the food from the array
+        setFoodItems(foodItems.filter((food) => !eatenFood.includes(food)));
+        setEatenFoodCount((prevCount) => prevCount + 1);
 
-      if (remainingFood.length !== food.length) {
-        setFood(generateFood(5)); // Generate more food if one was eaten
-      }
-
-      // Remove last part of the snake if no food eaten
-      if (remainingFood.length === food.length) {
+        // Check if player has eaten enough food to win
+        if (eatenFoodCount + 1 >= targetFoodCount) {
+          setGameWon(true); // Player wins
+        } else {
+          // No more food generation after win condition is reached
+          if (!gameWon) {
+            // Add new food at a random position (Only if player has not won)
+            while (true) {
+              const newFood = {
+                x: Math.floor(Math.random() * (canvasSize / gridSize)),
+                y: Math.floor(Math.random() * (canvasSize / gridSize)),
+              };
+              // Avoid placing food on the snake's position
+              if (!snake.some((s) => s.x === newFood.x && s.y === newFood.y)) {
+                setFoodItems((prevFoods) => [...prevFoods, newFood]);
+                break;
+              }
+            }
+          }
+        }
+      } else {
+        // Remove the last segment (tail) if no food is eaten
         newSnake.pop();
       }
 
       setSnake(newSnake);
-      setFood(remainingFood);
 
-      // Draw the game
+      // Draw everything
       ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, canvasSize, canvasSize); // Clear the canvas
+      ctx.fillRect(0, 0, canvasSize, canvasSize);
 
       ctx.fillStyle = "lime";
       newSnake.forEach(({ x, y }) =>
         ctx.fillRect(x * gridSize, y * gridSize, gridSize - 2, gridSize - 2)
       );
 
+      // Draw food items
       ctx.fillStyle = "red";
-      food.forEach(({ x, y }) =>
+      foodItems.forEach(({ x, y }) =>
         ctx.fillRect(x * gridSize, y * gridSize, gridSize - 2, gridSize - 2)
       );
     };
 
-    const interval = setInterval(drawGame, 150);
-    return () => clearInterval(interval);
-  }, [snake, food, velocity, gameOver]);
-
-  // Function to generate random food positions
-  function generateFood(count) {
-    const foodItems = [];
-    for (let i = 0; i < count; i++) {
-      let foodX, foodY;
-      // Ensure the food doesn't spawn on the snake's body
-      do {
-        foodX = Math.floor(Math.random() * (canvasSize / gridSize));
-        foodY = Math.floor(Math.random() * (canvasSize / gridSize));
-      } while (snake.some((s) => s.x === foodX && s.y === foodY)); // Avoid collision with snake
-      foodItems.push({ x: foodX, y: foodY });
-    }
-    return foodItems;
-  }
+    const interval = setInterval(drawGame, 400); // Draw every 150ms
+    return () => clearInterval(interval); // Cleanup interval on unmount
+  }, [snake, foodItems, velocity, gameOver, gameWon, eatenFoodCount]);
 
   return (
     <div style={{ textAlign: "center" }}>
       <h2>Snake Game</h2>
-      {gameOver && <div style={{ color: "red" }}>Game Over</div>}
+      {gameOver && !gameWon && <div style={{ color: "red" }}>Game Over</div>}
+      {gameWon && <div style={{ color: "green" }}>You Win!</div>}
       <canvas
         ref={canvasRef}
         width={canvasSize}
         height={canvasSize}
         style={{ border: "2px solid white" }}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
       />
     </div>
   );
